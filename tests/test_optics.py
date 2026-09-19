@@ -204,6 +204,32 @@ def test_refraction_air_to_glass_bends_toward_axis_for_convex_surface():
     assert result["outgoing_ray"]["y"] == pytest.approx(1.0)
 
 
+def test_refraction_into_glass_magnification_matches_image_plane_height_ratio():
+    # 光路停在玻璃里：det M = n1/n2 ≠ 1，放大率必须等于
+    # 像高/物高（像高 = 出射高度 + 像距×出射角，物高 = 入射高度 - 物距×入射角），
+    # 而不是 det M = 1 时才成立的 1/(Cs + D)
+    elements = normalize_elements([
+        {"type": "refract", "params": {"R": 100.0, "n1": 1.0, "n2": 1.5}},
+    ])
+    a, b, c, d = system_matrix(elements)
+    assert a * d - b * c == pytest.approx(2.0 / 3.0, abs=1e-15)
+
+    expected = {300.0: (900.0, -2.0), 400.0: (600.0, -1.0)}
+    for s, (s_prime, magnification) in expected.items():
+        imaging = solve_imaging(elements, s)
+        assert imaging["image_distance"] == pytest.approx(s_prime, abs=1e-9)
+        assert imaging["magnification"] == pytest.approx(magnification, abs=1e-12)
+
+        # 多条入射光线（含非零入射角）推到像面，高度比都必须等于放大率字段
+        for ray in ((2.0, 0.0), (3.0, 0.005), (1.0, -0.002)):
+            outgoing = trace(elements, ray)["outgoing_ray"]
+            object_height = ray[0] - s * ray[1]
+            image_height = outgoing["y"] + s_prime * outgoing["u"]
+            assert object_height != 0.0
+            assert image_height / object_height == pytest.approx(
+                imaging["magnification"], abs=1e-9)
+
+
 # ---------------------------------------------------------------------------
 # 退回项：焦距为零、未知元件、负间隔、非正折射率、非有限数
 # ---------------------------------------------------------------------------

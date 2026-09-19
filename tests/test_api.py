@@ -267,3 +267,42 @@ def test_refractive_path_roundtrip_over_http():
     body = resp.json()
     assert body["determinant"] == pytest.approx(1.0, abs=1e-12)
     assert body["roundtrip"]["residual"] <= 1e-10
+
+
+# ---------------------------------------------------------------------------
+# 光路停在玻璃里：响应内放大率必须与出射光线推到像面的高度比一致
+# ---------------------------------------------------------------------------
+
+GLASS_END_ELEMENTS = [
+    {"type": "refract", "params": {"R": 100.0, "n1": 1.0, "n2": 1.5}},
+]
+
+
+def _assert_magnification_matches_outgoing_ray(body, s, s_prime, magnification):
+    imaging = body["imaging"]
+    assert imaging["image_distance"] == pytest.approx(s_prime, abs=1e-9)
+    assert imaging["magnification"] == pytest.approx(magnification, abs=1e-12)
+    # 同一响应的出射光线再走像距这一段：像高/物高必须等于放大率字段
+    incoming, outgoing = body["incoming_ray"], body["outgoing_ray"]
+    object_height = incoming["y"] - s * incoming["u"]
+    image_height = outgoing["y"] + s_prime * outgoing["u"]
+    assert image_height / object_height == pytest.approx(
+        imaging["magnification"], abs=1e-9)
+
+
+def test_trace_ending_in_glass_magnification_consistent_with_outgoing_ray():
+    client.post("/paths", json={"name": "glass_end", "elements": GLASS_END_ELEMENTS})
+
+    for s, s_prime, magnification in ((300.0, 900.0, -2.0), (400.0, 600.0, -1.0)):
+        payload = {"ray": {"y": 2.0, "u": 0.0}, "s": s}
+        # 一次性内联追迹
+        resp = client.post("/trace",
+                           json={**payload, "elements": GLASS_END_ELEMENTS})
+        assert resp.status_code == 200, resp.text
+        _assert_magnification_matches_outgoing_ray(
+            resp.json(), s, s_prime, magnification)
+        # 同一光路登记成具名档再点名追迹，结果必须一致
+        resp_named = client.post("/paths/glass_end/trace", json=payload)
+        assert resp_named.status_code == 200, resp_named.text
+        _assert_magnification_matches_outgoing_ray(
+            resp_named.json(), s, s_prime, magnification)
