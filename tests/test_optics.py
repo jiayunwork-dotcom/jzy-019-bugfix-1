@@ -205,6 +205,74 @@ def test_refraction_air_to_glass_bends_toward_axis_for_convex_surface():
 
 
 # ---------------------------------------------------------------------------
+# 光线停在玻璃里（末介质折射率不等于入射介质）：放大率必须等于
+# 像高/物高，像高用出射高度加像距乘出射角，物高用入射高度减物距乘入射角
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("s,expected_s_prime,expected_mag", [
+    (300.0, 900.0, -2.0),
+    (400.0, 600.0, -1.0),
+])
+def test_ray_ending_inside_glass_magnification_matches_image_height(
+        s, expected_s_prime, expected_mag):
+    # 单块空气→玻璃折射面（R=100, n1=1, n2=1.5），光线停在玻璃里：
+    # 系统矩阵 det = n1/n2 = 2/3，放大率必须带行列式因子。
+    elements = normalize_elements([
+        {"type": "refract", "params": {"R": 100.0, "n1": 1.0, "n2": 1.5}},
+    ])
+    imaging = solve_imaging(elements, s)
+    s_prime = imaging["image_distance"]
+    assert s_prime == pytest.approx(expected_s_prime, abs=1e-9)
+    assert imaging["magnification"] == pytest.approx(expected_mag, abs=1e-12)
+
+    # 用同一条响应里的出射光线把像高推到像面，与放大率字段逐一对齐
+    ray = (2.0, 0.0)
+    result = trace(elements, ray)
+    y_out = result["outgoing_ray"]["y"]
+    u_out = result["outgoing_ray"]["u"]
+    assert u_out == pytest.approx(-1.0 / 150.0, abs=1e-12)
+
+    object_height = ray[0] - s * ray[1]
+    image_height = y_out + s_prime * u_out
+    assert image_height / object_height == pytest.approx(expected_mag, abs=1e-12)
+    assert imaging["magnification"] == pytest.approx(
+        image_height / object_height, abs=1e-12)
+
+
+def test_ray_ending_inside_glass_magnification_matches_for_oblique_ray():
+    # 非零入射角再来一遍：物高不再等于入射高度，比值约束仍须成立
+    elements = normalize_elements([
+        {"type": "refract", "params": {"R": 100.0, "n1": 1.0, "n2": 1.5}},
+    ])
+    s = 300.0
+    ray = (3.5, 0.004)
+    imaging = solve_imaging(elements, s)
+    result = trace(elements, ray)
+
+    object_height = ray[0] - s * ray[1]
+    image_height = (result["outgoing_ray"]["y"]
+                    + imaging["image_distance"] * result["outgoing_ray"]["u"])
+    assert object_height != 0.0
+    assert imaging["magnification"] == pytest.approx(
+        image_height / object_height, abs=1e-12)
+
+
+def test_thin_lens_control_case_still_matches_image_height():
+    # 对照组：空气里的薄透镜（det=1），新旧公式应一致
+    elements = normalize_elements([{"type": "lens", "params": {"f": 100.0}}])
+    ray, s = (5.0, 0.0), 200.0
+    imaging = solve_imaging(elements, s)
+    result = trace(elements, ray)
+    object_height = ray[0] - s * ray[1]
+    image_height = (result["outgoing_ray"]["y"]
+                    + imaging["image_distance"] * result["outgoing_ray"]["u"])
+    assert imaging["image_distance"] == pytest.approx(200.0)
+    assert imaging["magnification"] == pytest.approx(-1.0)
+    assert imaging["magnification"] == pytest.approx(
+        image_height / object_height, abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # 退回项：焦距为零、未知元件、负间隔、非正折射率、非有限数
 # ---------------------------------------------------------------------------
 

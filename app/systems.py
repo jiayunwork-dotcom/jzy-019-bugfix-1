@@ -139,13 +139,17 @@ def solve_imaging(elements: Sequence[Element],
         A s + B + s'(C s + D) = 0
         s' = -(A s + B) / (C s + D)
 
-    横向放大率（det M = 1）::
+    横向放大率（像高/物高）::
 
-        m = A + s' C = 1 / (C s + D)
+        m = A + s' C = det(M) / (C s + D)
 
+    仅在 ``det M = 1``（空气系统，或最终回到同一介质）时才退化为
+    ``1/(C s + D)``；单块空气→玻璃折射面 ``det M = n1/n2``，必须带上
+    行列式因子，否则放大率与出射光线推到像面的高度对不上。
     单透镜代回即还原高斯公式 ``1/s + 1/s' = 1/f``。
     """
     a, b, c, d = system_matrix(elements)
+    determinant = a * d - b * c
     afocal = abs(c) <= AFOCAL_C_TOL
     effective_focal_length = None if afocal else -1.0 / c
 
@@ -179,7 +183,7 @@ def solve_imaging(elements: Sequence[Element],
         # C=0：无有限焦点，但有限物距仍共轭到有限（虚/实）像面
         result.update({
             "image_distance": -(a * s + b) / d,
-            "magnification": 1.0 / d,
+            "magnification": determinant / d,
             "note": "系统接近无焦（|C| <= {:g}），无有限焦距".format(AFOCAL_C_TOL),
         })
         return result
@@ -194,7 +198,8 @@ def solve_imaging(elements: Sequence[Element],
         return result
 
     image_distance = -(a * s + b) / denominator
-    magnification = 1.0 / denominator
+    # m = A + s'C = det(M)/(Cs+D)；det=1 时退化为 1/(Cs+D)
+    magnification = determinant / denominator
     result.update({
         "image_distance": image_distance,
         "magnification": magnification,

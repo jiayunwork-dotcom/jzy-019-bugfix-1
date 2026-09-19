@@ -267,3 +267,55 @@ def test_refractive_path_roundtrip_over_http():
     body = resp.json()
     assert body["determinant"] == pytest.approx(1.0, abs=1e-12)
     assert body["roundtrip"]["residual"] <= 1e-10
+
+
+@pytest.mark.parametrize("s,expected_s_prime,expected_mag", [
+    (300.0, 900.0, -2.0),
+    (400.0, 600.0, -1.0),
+])
+def test_ray_ending_inside_glass_magnification_matches_image_height_over_http(
+        s, expected_s_prime, expected_mag):
+    # 光线停在玻璃里：一次性追迹
+    resp = client.post("/trace", json={
+        "elements": [
+            {"type": "refract", "params": {"R": 100.0, "n1": 1.0, "n2": 1.5}},
+        ],
+        "ray": {"y": 2.0, "u": 0.0},
+        "s": s,
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    imaging = body["imaging"]
+    assert imaging["image_distance"] == pytest.approx(expected_s_prime, abs=1e-9)
+    assert imaging["magnification"] == pytest.approx(expected_mag, abs=1e-12)
+
+    # 像高 = 出射高度 + 像距 × 出射角；物高 = 入射高度 - 物距 × 入射角
+    y_in, u_in = 2.0, 0.0
+    y_out = body["outgoing_ray"]["y"]
+    u_out = body["outgoing_ray"]["u"]
+    image_height = y_out + imaging["image_distance"] * u_out
+    object_height = y_in - s * u_in
+    assert image_height / object_height == pytest.approx(expected_mag, abs=1e-12)
+    assert imaging["magnification"] == pytest.approx(
+        image_height / object_height, abs=1e-12)
+
+
+def test_ray_ending_inside_glass_named_path_also_fixed():
+    # 同一面登记成具名档再点名追迹，放大率同样必须与像面高度比一致
+    resp_reg = client.post("/paths", json={
+        "name": "air_to_glass",
+        "elements": [
+            {"type": "refract", "params": {"R": 100.0, "n1": 1.0, "n2": 1.5}},
+        ],
+    })
+    assert resp_reg.status_code == 200, resp_reg.text
+
+    resp = client.post("/paths/air_to_glass/trace",
+                       json={"ray": {"y": 2.0, "u": 0.0}, "s": 300.0})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    imaging = body["imaging"]
+    assert imaging["magnification"] == pytest.approx(-2.0, abs=1e-12)
+    image_height = (body["outgoing_ray"]["y"]
+                    + imaging["image_distance"] * body["outgoing_ray"]["u"])
+    assert imaging["magnification"] == pytest.approx(image_height / 2.0, abs=1e-12)
